@@ -1,0 +1,296 @@
+// ============================================================
+// Enterprise ERP - MVP Prisma Schema (Supabase Auth version)
+//
+// Auth is handled entirely by Supabase (auth.users table, managed by
+// Supabase, lives in the `auth` schema). The `User` model below is a
+// PROFILE table in the `public` schema — its `id` must always be set
+// to the same UUID as the corresponding auth.users.id. Never generate
+// it with @default(uuid()); it's assigned by Supabase at sign-up time.
+//
+// A profile row must be created for every auth user, either:
+//   (a) manually in your NestJS signup endpoint right after calling
+//       supabase.auth.admin.createUser(), or
+//   (b) via a Postgres trigger on auth.users that auto-inserts into
+//       public."User" (more robust, more setup — optional for MVP).
+// This schema assumes (a) for simplicity within the 1-week timeline.
+// ============================================================
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// AUTH (profile only — Supabase owns credentials/sessions)
+// ============================================================
+
+enum Role {
+  ADMIN
+  HR
+  MANAGER
+  EMPLOYEE
+}
+
+model User {
+  id           String   @id // MUST equal the matching auth.users.id from Supabase — no default
+  name         String
+  email        String   @unique
+  role         Role
+  departmentId String?
+  department   Department? @relation("DepartmentUsers", fields: [departmentId], references: [id])
+  themeAccent  String   @default("blue") // red | blue | green | purple | orange | yellow
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  employee           Employee?
+  managedDepartments Department[]   @relation("DepartmentManager")
+  approvedLeaves     LeaveRequest[] @relation("LeaveApprover")
+  assignedCustomers  Customer[]     @relation("CustomerAssignee")
+  assignedLeads      Lead[]         @relation("LeadAssignee")
+  createdProjects    Project[]      @relation("ProjectCreator")
+  assignedTasks      Task[]         @relation("TaskAssignee")
+  documents          Document[]
+  notifications      Notification[]
+  activityLogs       ActivityLog[]
+
+  @@index([role])
+  @@index([departmentId])
+  @@index([isActive])
+}
+
+// ============================================================
+// HR / EMPLOYEES
+// ============================================================
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  managerId   String?
+  manager     User?    @relation("DepartmentManager", fields: [managerId], references: [id])
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  users User[] @relation("DepartmentUsers")
+}
+
+model Employee {
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id])
+  employeeCode   String    @unique
+  firstName      String
+  lastName       String
+  phone          String?
+  address        String?
+  designation    String?
+  avatarUrl      String?
+  gender         String?
+  dateOfBirth    DateTime? @db.Date
+  dateOfJoining  DateTime? @db.Date
+  employmentType String    @default("full_time") // full_time | part_time | contract
+  basicSalary    Decimal   @default(0) @db.Decimal(12, 2)
+  managerId      String?
+  manager        Employee?  @relation("EmployeeManager", fields: [managerId], references: [id])
+  subordinates   Employee[] @relation("EmployeeManager")
+  status         String    @default("active") // active | terminated | resigned | suspended
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  attendance    Attendance[]
+  leaveRequests LeaveRequest[]
+
+  @@index([managerId])
+  @@index([status])
+}
+
+model Attendance {
+  id            String    @id @default(uuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id])
+  date          DateTime  @db.Date
+  checkIn       DateTime?
+  checkOut      DateTime?
+  workHours     Decimal?  @db.Decimal(5, 2)
+  status        String    @default("present") // present | absent | late | half_day | leave
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  @@unique([employeeId, date])
+  @@index([date])
+  @@index([status])
+}
+
+model LeaveType {
+  id          String  @id @default(uuid())
+  name        String  @unique // sick | casual | annual | unpaid
+  daysPerYear Int     @default(0)
+  isPaid      Boolean @default(true)
+  isActive    Boolean @default(true)
+
+  leaveRequests LeaveRequest[]
+}
+
+model LeaveRequest {
+  id           String    @id @default(uuid())
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id])
+  leaveTypeId  String
+  leaveType    LeaveType @relation(fields: [leaveTypeId], references: [id])
+  startDate    DateTime  @db.Date
+  endDate      DateTime  @db.Date
+  reason       String?
+  status       String    @default("pending") // pending | approved | rejected
+  approvedById String?
+  approvedBy   User?     @relation("LeaveApprover", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([startDate])
+}
+
+// ============================================================
+// CRM (lite)
+// ============================================================
+
+model Lead {
+  id                    String    @id @default(uuid())
+  firstName             String
+  lastName              String
+  email                 String?
+  phone                 String?
+  company               String?
+  status                String    @default("new") // new | contacted | qualified | won | lost
+  assignedToId          String?
+  assignedTo            User?     @relation("LeadAssignee", fields: [assignedToId], references: [id])
+  notes                 String?
+  convertedToCustomerId String?
+  convertedToCustomer   Customer? @relation(fields: [convertedToCustomerId], references: [id])
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([status])
+  @@index([assignedToId])
+}
+
+model Customer {
+  id              String   @id @default(uuid())
+  name            String
+  email           String   @unique
+  phone           String?
+  billingAddress  String?
+  shippingAddress String?
+  status          String   @default("active") // active | inactive | suspended
+  assignedToId    String?
+  assignedTo      User?    @relation("CustomerAssignee", fields: [assignedToId], references: [id])
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  leads    Lead[]
+  projects Project[]
+
+  @@index([status])
+  @@index([assignedToId])
+}
+
+// ============================================================
+// PROJECTS & TASKS
+// ============================================================
+
+model Project {
+  id           String    @id @default(uuid())
+  name         String
+  description  String?
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id])
+  status       String    @default("planning") // planning | active | completed | on_hold
+  startDate    DateTime? @db.Date
+  endDate      DateTime? @db.Date
+  createdById  String?
+  createdBy    User?     @relation("ProjectCreator", fields: [createdById], references: [id])
+  createdAt    DateTime  @default(now())
+
+  tasks Task[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model Task {
+  id           String    @id @default(uuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id])
+  title        String
+  description  String?
+  assignedToId String?
+  assignedTo   User?     @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  status       String    @default("todo") // todo | in_progress | review | done
+  priority     String    @default("medium") // low | medium | high
+  dueDate      DateTime? @db.Date
+  createdAt    DateTime  @default(now())
+
+  @@index([projectId])
+  @@index([assignedToId])
+  @@index([status])
+}
+
+// ============================================================
+// DOCUMENTS, NOTIFICATIONS, ACTIVITY LOG
+// ============================================================
+
+model Document {
+  id          String   @id @default(uuid())
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  relatedType String?  // employee | project | customer | lead
+  relatedId   String?
+  fileUrl     String
+  fileName    String
+  mimeType    String?
+  fileSize    BigInt?
+  uploadedAt  DateTime @default(now())
+
+  @@index([ownerId])
+  @@index([relatedType, relatedId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String?
+  type      String   @default("system") // system | task | leave | project
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String   // created | updated | deleted | approved | rejected | login | logout
+  entityType String   // employee | leave_request | project | task | customer | lead
+  entityId   String?
+  oldValues  Json?
+  newValues  Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+}
