@@ -24,7 +24,7 @@ export async function notify(params: {
         type: params.type ?? "system",
       },
     })
-    .catch(() => {});
+    .catch(() => { });
 }
 
 /**
@@ -49,7 +49,7 @@ export async function notifyMany(params: {
         type: params.type ?? "system",
       })),
     })
-    .catch(() => {});
+    .catch(() => { });
 }
 
 /**
@@ -72,9 +72,9 @@ export async function logActivity(params: {
         action: params.action,
         entityType: params.entityType,
         entityId: params.entityId ?? undefined,
-        oldValues: params.oldValues ?? undefined,
-        newValues: params.newValues ?? undefined,
+        oldValues: params.oldValues as any ?? undefined,   // 👈 cast to any
+        newValues: params.newValues as any ?? undefined,   // 👈 cast to any
       },
     })
-    .catch(() => {});
+    .catch(() => { });
 }
