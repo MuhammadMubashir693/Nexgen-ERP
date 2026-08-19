@@ -17,14 +17,14 @@ import administrationRoutes from "./modules/administration/administration.routes
 
 const app = express();
 
-app.use(helmet());
+const allowedOrigins = ['https://nexgen-erp.vercel.app', 'http://localhost:5173']; // Replace with your actual Vercel URL
 
-app.use(
-  cors({
-    origin: "http://localhost:5173",
-    credentials: true,
-  }),
-);
+app.use(cors({
+  origin: allowedOrigins,  // NOT "*" – because you're using credentials (cookies/auth headers)
+  credentials: true,       // if you send cookies or Authorization header
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 app.use(express.json());
 
