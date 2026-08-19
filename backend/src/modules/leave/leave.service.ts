@@ -1,4 +1,5 @@
 import { prisma } from "../../lib/prisma";
+import { notify } from "../../lib/notify";
 import type {
   CreateLeaveRequestInput,
   CreateLeaveTypeInput,
@@ -390,6 +391,7 @@ export async function updateLeaveStatus(
       employee: {
         select: {
           id: true,
+          userId: true,
           managerId: true,
           user: {
             select: {
@@ -478,6 +480,14 @@ export async function updateLeaveStatus(
     }
 
     return record;
+  });
+
+  // Notify the employee whose request was reviewed
+  await notify({
+    userId: existing.employee.userId,
+    title: input.status === "approved" ? "Leave request approved" : "Leave request rejected",
+    message: `Your ${existing.leaveType.name} leave request (${existing.startDate.toISOString().slice(0, 10)} to ${existing.endDate.toISOString().slice(0, 10)}) was ${input.status}.`,
+    type: "leave",
   });
 
   return serializeLeaveRequest(updated);

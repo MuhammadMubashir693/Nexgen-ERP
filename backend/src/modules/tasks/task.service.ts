@@ -1,4 +1,5 @@
 import { prisma } from "../../lib/prisma";
+import { notify } from "../../lib/notify";
 import type {
   CreateTaskInput,
   TaskListQuery,
@@ -159,6 +160,15 @@ export async function createTask(user: RequestingUser, input: CreateTaskInput) {
     include: taskInclude,
   });
 
+  if (assignedUserId) {
+    await notify({
+      userId: assignedUserId,
+      title: "New task assigned to you",
+      message: `"${task.title}" on ${project.name}${task.dueDate ? ` — due ${task.dueDate.toISOString().slice(0, 10)}` : ""}`,
+      type: "task",
+    });
+  }
+
   return serializeTask(task);
 }
 
@@ -191,6 +201,15 @@ export async function updateTask(id: string, input: UpdateTaskInput) {
     },
     include: taskInclude,
   });
+
+  if (assignedUserId && assignedUserId !== existing.assignedToId) {
+    await notify({
+      userId: assignedUserId,
+      title: "Task assigned to you",
+      message: `"${updated.title}"${updated.dueDate ? ` — due ${updated.dueDate.toISOString().slice(0, 10)}` : ""}`,
+      type: "task",
+    });
+  }
 
   return serializeTask(updated);
 }

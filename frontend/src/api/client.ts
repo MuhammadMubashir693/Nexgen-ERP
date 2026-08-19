@@ -98,6 +98,71 @@ export async function signIn(email: string, password: string) {
   return data
 }
 
+/**
+ * Sends a password-reset email via Supabase Auth. Available to any user
+ * from the login screen (no session required) — distinct from the
+ * in-app "Change Password" in Profile > Security, which requires
+ * already being logged in.
+ */
+export async function requestPasswordReset(email: string) {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+
+  if (!supabaseUrl || !publishableKey) {
+    throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY')
+  }
+
+  // redirectTo must be added to the Supabase project's Auth > URL
+  // Configuration > Redirect URLs allowlist, or the email link will fail.
+  const redirectTo = `${window.location.origin}/`
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/recover`, {
+    method: 'POST',
+    headers: {
+      apikey: publishableKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, gotrue_meta_security: {}, redirect_to: redirectTo }),
+  })
+
+  // Supabase intentionally returns 200 even for unknown emails, to avoid
+  // leaking which addresses have accounts. Only genuine request failures
+  // (bad payload, rate limiting, etc.) surface as errors here.
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.error_description ?? data.msg ?? 'Could not send reset email')
+  }
+}
+
+/**
+ * Completes a password reset. Must be called with the access token
+ * Supabase places in the URL hash fragment when the user clicks the
+ * reset-password email link (type=recovery).
+ */
+export async function completePasswordReset(recoveryAccessToken: string, newPassword: string) {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+
+  if (!supabaseUrl || !publishableKey) {
+    throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY')
+  }
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    method: 'PUT',
+    headers: {
+      apikey: publishableKey,
+      Authorization: `Bearer ${recoveryAccessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password: newPassword }),
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(data.error_description ?? data.msg ?? 'Could not reset password')
+  }
+}
+
 export async function signOut() {
   const token = accessToken
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL

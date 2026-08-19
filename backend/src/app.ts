@@ -12,6 +12,8 @@ import taskRoutes from "./modules/tasks/task.routes";
 import crmRoutes from "./modules/crm/crm.routes";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes";
 import documentRoutes from "./modules/documents/document.routes";
+import notificationRoutes from "./modules/notifications/notification.routes";
+import administrationRoutes from "./modules/administration/administration.routes";
 
 const app = express();
 
@@ -44,5 +46,7 @@ app.use("/api/tasks", taskRoutes);
 app.use("/api/crm", crmRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/documents", documentRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/administration", administrationRoutes);
 
 export default app;

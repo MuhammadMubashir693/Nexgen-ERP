@@ -1,6 +1,13 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react'
 import { useAuth } from '../../lib/auth'
 import { formatRoleLabel, getInitials } from '../../lib/user'
+import {
+  listNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+  type AppNotification,
+  type NotificationType,
+} from '../../api/notifications'
 
 export interface Breadcrumb {
   label: string
@@ -16,8 +23,43 @@ interface Notification {
   read: boolean
 }
 
+// Backend notification types map to Header's visual variants.
+// "task"/"project" read as info (neutral update), "leave" as success/danger
+// depending on the message content isn't available here, so it defaults to
+// info too — the title text itself ("approved"/"rejected") carries that signal.
+const typeToVariant: Record<NotificationType, Notification['type']> = {
+  system: 'warning',
+  task: 'info',
+  leave: 'info',
+  project: 'info',
+}
+
+function relativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const diffMin = Math.round(diffMs / 60000)
+  if (diffMin < 1) return 'Just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.round(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.round(diffHr / 24)
+  if (diffDay < 7) return `${diffDay}d ago`
+  return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+function toHeaderNotification(n: AppNotification): Notification {
+  return {
+    id: n.id,
+    type: typeToVariant[n.type] ?? 'info',
+    title: n.title,
+    body: n.message ?? '',
+    time: relativeTime(n.createdAt),
+    read: n.isRead,
+  }
+}
+
 const notifColor: Record<Notification['type'], string> = {
   info: 'bg-[var(--info-bg)] text-[var(--info)]',
+
   success: 'bg-[var(--success-bg)] text-[var(--success)]',
   warning: 'bg-[var(--warning-bg)] text-[var(--warning)]',
   danger: 'bg-[var(--danger-bg)] text-[var(--danger)]',
@@ -108,7 +150,8 @@ export default function Header({
   const [searchValue, setSearchValue] = useState('')
   const [notifOpen, setNotifOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [notifications] = useState<Notification[]>([])
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [notifLoading, setNotifLoading] = useState(false)
 
   const notifRef = useRef<HTMLDivElement>(null)
   const profileRef = useRef<HTMLDivElement>(null)
@@ -117,6 +160,51 @@ export default function Header({
   useOutsideClick(notifRef, () => setNotifOpen(false))
   useOutsideClick(profileRef, () => setProfileOpen(false))
   useOutsideClick(searchRef, () => setSearchOpen(false))
+
+  async function loadNotifications() {
+    setNotifLoading(true)
+    try {
+      const result = await listNotifications({ limit: 10 })
+      setNotifications(result.notifications.map(toHeaderNotification))
+    } catch {
+      // Silently ignore — the bell just shows stale/empty state, not worth a toast
+    } finally {
+      setNotifLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadNotifications()
+    // Poll every 60s so the badge count stays roughly fresh without a websocket
+    const interval = window.setInterval(() => void loadNotifications(), 60000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  async function handleNotificationClick(notification: Notification) {
+    if (!notification.read) {
+      setNotifications((current) =>
+        current.map((n) => (n.id === notification.id ? { ...n, read: true } : n)),
+      )
+      try {
+        await markNotificationRead(notification.id)
+      } catch {
+        // Revert on failure
+        setNotifications((current) =>
+          current.map((n) => (n.id === notification.id ? { ...n, read: false } : n)),
+        )
+      }
+    }
+  }
+
+  async function handleMarkAllRead() {
+    const previous = notifications
+    setNotifications((current) => current.map((n) => ({ ...n, read: true })))
+    try {
+      await markAllNotificationsRead()
+    } catch {
+      setNotifications(previous)
+    }
+  }
 
   const unreadCount = notifications.filter((n) => !n.read).length
   const displayName = user?.name ?? 'User'
@@ -251,8 +339,20 @@ export default function Header({
             <div className="absolute right-0 top-full mt-2 w-80 bg-card border border-border rounded-[var(--radius-lg)] shadow-[0_8px_24px_rgba(0,0,0,0.12)] z-50">
               <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <span className="font-semibold text-sm text-foreground">Notifications</span>
+                {unreadCount > 0 && (
+                  <button
+                    onClick={() => void handleMarkAllRead()}
+                    className="text-[11px] font-medium text-primary hover:underline cursor-pointer"
+                  >
+                    Mark all read
+                  </button>
+                )}
               </div>
-              {notifications.length === 0 ? (
+              {notifLoading && notifications.length === 0 ? (
+                <div className="px-4 py-8 text-center">
+                  <p className="text-sm text-muted-foreground">Loading…</p>
+                </div>
+              ) : notifications.length === 0 ? (
                 <div className="px-4 py-8 text-center">
                   <p className="text-sm text-muted-foreground">No notifications yet</p>
                   <p className="text-xs text-muted-foreground/70 mt-1">
@@ -265,6 +365,7 @@ export default function Header({
                     {notifications.map((n) => (
                       <div
                         key={n.id}
+                        onClick={() => void handleNotificationClick(n)}
                         className={`flex gap-3 px-4 py-3 transition-colors hover:bg-muted/40 cursor-pointer ${
                           !n.read ? 'bg-accent/20' : ''
                         }`}
@@ -292,7 +393,10 @@ export default function Header({
                     ))}
                   </div>
                   <div className="px-4 py-2.5 border-t border-border">
-                    <button className="w-full text-xs font-medium text-primary hover:underline cursor-pointer text-center">
+                    <button
+                      onClick={() => { setNotifOpen(false); onNavigate('notifications') }}
+                      className="w-full text-xs font-medium text-primary hover:underline cursor-pointer text-center"
+                    >
                       View all notifications
                     </button>
                   </div>

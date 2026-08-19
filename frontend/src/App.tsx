@@ -10,6 +10,8 @@ import Projects from './pages/Projects'
 import CRM from './pages/CRM'
 import Documents from './pages/Documents'
 import Profile from './pages/Profile'
+import Notifications from './pages/Notifications'
+import Administration from './pages/Administration'
 import ModulePlaceholder from './pages/ModulePlaceholder'
 import Login from './components/auth/Login'
 import { AuthProvider, useAuth } from './lib/auth'
@@ -589,7 +591,11 @@ function ERPApp() {
     return <div className="min-h-screen bg-background flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
   }
 
-  if (!user) return <Login />
+  // A password-reset email link (#access_token=...&type=recovery) always
+  // routes to the reset screen, even if a stale session is still logged in
+  // in this browser — otherwise the link would silently do nothing.
+  const isRecoveryLink = window.location.hash.includes('type=recovery')
+  if (!user || isRecoveryLink) return <Login />
 
   // Build page content
   let content: ReactNode
@@ -611,6 +617,10 @@ function ERPApp() {
     content = <Documents />
   } else if (activePage === 'profile' || activePage === 'settings') {
     content = <Profile />
+  } else if (activePage === 'notifications') {
+    content = <Notifications />
+  } else if (activePage === 'administration') {
+    content = <Administration />
   } else {
     const cfg = MODULE_CONFIGS[activePage]
     if (cfg) {
